@@ -19,7 +19,7 @@ import itertools
 class MultiImageFolder(data.Dataset):
     def __init__(self, dataset_list, transform, loader = default_loader, 
                     known_data_source=True, is_test=False) -> None:
-        '''dataset_list 中的每个 dataset, 现在都是 ImageFolder 类的数据集'''
+        '''输入的 dataset_list 中的每个 dataset, 都是 ImageFolder 类的数据集'''
         super().__init__()
         self.loader = loader
         self.transform = transform
@@ -30,7 +30,7 @@ class MultiImageFolder(data.Dataset):
         classes_list = [x.classes for x in dataset_list]
         self.classes_list = classes_list
         self.dataset_list = dataset_list
-        self.classes = [y for x in self.classes_list for y in x]
+        self.classes = [y for x in self.classes_list for y in x]    # len(self.classes) 等价于 num_classes(总类数)
 
         start_id = 0
         self.samples = []
@@ -40,6 +40,8 @@ class MultiImageFolder(data.Dataset):
                 if not is_test:
                     # concat the taxonomy of all datasets
                     img, target = data[:2]  # 这里的 target 本身是 int, 并不是 one-hot label 的形式.
+                    # one_hot_target = torch.nn.functional.one_hot(
+                    #     torch.tensor(target+start_id), num_classes=len(self.classes))
                     self.samples.append((img, target+start_id, dataset_id))
                     
                     # 在更新完 multiImgaeFolder 自己的 self.samples 后, 也把输入参数 dataset_list
@@ -69,8 +71,6 @@ class MultiImageFolder(data.Dataset):
             sample = self.transform(sample) # 数据集的 transform 在 MultiImageFolder 取数据的同时才会做.
 
         # 返回的数据类型 (tensor, int tensor, int number)
-        # TODO(BY DQR): 需要把 target 变为 one-hot label(总长度和 dataset_list 中总类数相同), 
-        # 否则 CrossEntropyLoss 的 output 和 target 维度对不上.
         return sample, target, dataset_id
 
 

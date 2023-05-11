@@ -25,7 +25,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
-    print_freq = 10
+    print_freq = 10 # 每 <print_freq> 个 iterations 输出一次实验结果.
 
     for data in metric_logger.log_every(data_loader, print_freq, header):
         samples, targets, dataset_ids = data
@@ -40,6 +40,11 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
                 mask = class_indicator[targets]
                 outputs[~mask.bool()] = -1e2
 
+            # one_hot_targets = torch.nn.functional.one_hot(
+            #     targets, num_classes=args.nb_classes
+            # )
+            # print(f'DEBUGGING: outputs.shape = {outputs.shape}, targets.shape = {one_hot_targets.shape}')
+            # loss = criterion(outputs, one_hot_targets)
             loss = criterion(outputs, targets)
 
         loss_value = loss.item()
@@ -68,7 +73,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
 
 
 @torch.no_grad()
-def evaluate(data_loader, model, device, dataset_id=None, dump_result=False):
+def evaluate(data_loader, model, device, dataset_id=None, dump_result=False, args = None):
     criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -86,6 +91,7 @@ def evaluate(data_loader, model, device, dataset_id=None, dump_result=False):
         # compute output
         with torch.cuda.amp.autocast():
             output = model(images, dataset_id)
+            # print(f'DEBUGGING: output.shape = {output.shape}')
 
         if dump_result :
             file_ids = data[-1].tolist()
@@ -93,6 +99,10 @@ def evaluate(data_loader, model, device, dataset_id=None, dump_result=False):
             for id, pred_id in zip(file_ids, pred_labels) :
                 result_json[id] = pred_id
         else :
+            # one_hot_target = torch.nn.functional.one_hot(
+            #     target, num_classes=args.nb_classes
+            # )
+            # loss = criterion(output, one_hot_target)
             loss = criterion(output, target)
             acc1, acc5 = accuracy(output, target, topk=(1, 5))
             batch_size = images.shape[0]

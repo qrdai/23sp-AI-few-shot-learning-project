@@ -141,6 +141,7 @@ class MetricLogger(object):
                 eta_seconds = iter_time.global_avg * (len(iterable) - i)
                 eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
                 if torch.cuda.is_available():
+                    # 这里是每10个 iterations 输出的数据项汇总.
                     print(log_msg.format(
                         i, len(iterable), eta=eta_string,
                         meters=str(self),

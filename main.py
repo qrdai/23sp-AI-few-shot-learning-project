@@ -46,15 +46,21 @@ class CustomClassifier(torch.nn.Module):
         self.layers = torch.nn.Sequential(torch.nn.Linear(input_dim, output_dim))
 
     def forward(self, img, dataset_id=None):
+        '''dataset_id 这个 input 目前没有被用到; 后续改进时需要思考如何使用它.'''
         # TODO: how to leverage dataset_source in training and inference stage?
         pdtype = img.dtype
         feature = self.backbone.forward_features(img).to(pdtype)
-        print("DEBUGGING: ViT FEATURE SHAPE =", feature.shape)
-        # ViT/DeiT 类模型 forward_features 输出的形状为 (N,L,C), 即 (batch_size, sentence_length, embedding_dim);
-        # 而 batchnorm1d 接收的输入形状为 (N,C,L), 因此需要翻转后面两维度;
-        outputs = self.channel_bn(torch.transpose(feature, 1, 2))
-        # 最后输出线性层之前再翻转回来;
-        outputs = self.layers(torch.transpose(outputs, 1, 2))
+        # print(f'DEBUGGING: feature.shape = {feature.shape}')
+
+        # ViT/DeiT 类模型 forward_features 输出的 feature 形状为 (N,L,C), 即 (batch_size, sentence_length, embedding_dim);
+        # 而 batchnorm1d 接收的输入形状为 (N,C) 或 (N,C,L);
+        # 我们这里只需要 deit 输出的 cls_token, 经查阅源码, cls_token 被 concat 在输入 seq 的第一位.
+        feature = torch.squeeze(feature[:, 0, :], dim=1)    # 现在 feature 的形状应为 64*192.
+        # print(f'DEBUGGING: feature = {feature}')
+        # print(f'DEBUGGING: feature.shape = {feature.shape}')
+        outputs = self.channel_bn(feature)
+        outputs = self.layers(outputs)
+        # print(f'DEBUGGING: outputs.dtype = {outputs.dtype}')
         return outputs
 
 
@@ -208,10 +214,14 @@ def main(args):
 
     cudnn.benchmark = True
 
-    # args.nb_classes is the sum of number of classes for all datasets
+    # args.nb_classes 是所有 dataset 的 classes 数目的总和.
+    # build_dataset 返回的是一个 MultiImageFolder, 下面记为 dataset_train.
     dataset_train, args.nb_classes = build_dataset(is_train=True, args=args)
     dataset_val, *_ = build_dataset(is_train=False, args=args)
+    # print(f'DEBUGGING: nb_classes_train == {len(dataset_train.classes)}')
+    # print(f'DEBUGGING: nb_classes_val == {len(dataset_val.classes)}')
 
+    # TODO: 搞清楚下面是否只有在 args.distributed = True 的情况下才应该执行;
     if True:  # args.distributed:
         num_tasks = utils.get_world_size()
         global_rank = utils.get_rank()
@@ -233,7 +243,12 @@ def main(args):
         else:
             sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
+    # 用 dataset_train 这个 MultiIMageFolder 来构造 dataloader_train;
+    # 不在 dataloader 中声明 batch_size 的话, 默认 batch_size=1.
+    # collate_fn = operator.itemgetter(0), 表示每个样本独立返回, 不用合并成一个 tensor(batch)
     if args.known_data_source :
+        # 下面第一次定义的 dataloader_train 只是过渡性的, batch_size=1, 是为了
+        # 第二次定义中取 samples 方便;
         data_loader_train = torch.utils.data.DataLoader(
             dataset_train, sampler=sampler_train,
             batch_sampler=None,
@@ -241,8 +256,13 @@ def main(args):
             pin_memory=args.pin_mem,
             collate_fn=operator.itemgetter(0), 
         )
+        
+        # 第二次定义 dataloader_train, 最终返回的其实是一个 IterableDataset, 
+        # 把同一个 dataset 中 容量=batch_size 的 images, targets, dataset_ids 分别作为三个列表返回.
         data_loader_train = GroupedDataset(data_loader_train, args.batch_size, len(args.dataset_list))
     else :
+        # 若 args.known_data_source = False, 则直接从混合的若干个数据集(即 dataset_train)中, 
+        # 任意取出 batch_size 个样本.
         data_loader_train = torch.utils.data.DataLoader(
             dataset_train, sampler=sampler_train,
             batch_size=args.batch_size,
@@ -252,6 +272,7 @@ def main(args):
 
     data_loader_val_list = []
     dataset_val_total = dataset_val
+    # 这样写更好, 不容易引起歧义: for dataset_val in dataset_val_total.dataset_list: 
     for dataset_val in dataset_val.dataset_list:
         if args.dist_eval:
             if len(dataset_val) % num_tasks != 0:
@@ -276,7 +297,7 @@ def main(args):
     
     # Create a model with the timm function; any other model pre-trained under ImageNet-1k is allowed.
     model = create_model(args.model, num_classes=args.nb_classes, pretrained=True)
-    print("DEBUGGING: Model.embed_dim =", model.embed_dim)
+    # print("DEBUGGING: Model.embed_dim =", model.embed_dim)
     
     # number of classes for each dataset
     multi_dataset_classes = [len(x) for x in dataset_train.classes_list]
@@ -286,6 +307,7 @@ def main(args):
 
     model.to(device)
 
+    # ema 是 Exponential Moving Average 的简称;
     model_ema = None
     if args.model_ema:
         # Important to create EMA model after cuda(), DP wrapper, and AMP but before SyncBN and DDP wrapper
@@ -295,6 +317,7 @@ def main(args):
             device='cpu' if args.model_ema_force_cpu else '',
             resume='')
 
+    # ddp 是 DistributedDataParallel 的简称, 标记是否为分布式并行训练.
     model_without_ddp = model
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
@@ -306,6 +329,7 @@ def main(args):
     custom_params = [x for name, x in model_without_ddp.named_parameters() if 'backbone' not in name]
 
     # use smaller lr for backbone params
+    # backbone parameters 采用 0.1*args.lr, 而 custom_params 采用默认的 args.lr.
     params = [
                 {'params': backbone_params, 'lr': args.lr * 0.1},
                 {'params': custom_params}
@@ -327,6 +351,8 @@ def main(args):
     if args.bce_loss:
         criterion = torch.nn.BCEWithLogitsLoss()
 
+    # 下面从 url 下载 checkpoints, 并且分别把 checkpoint 中的 'model', 'optimizer', 'lr_scheduler' 等都 load 入对应模块.
+    # TODO: 搞懂 checkpoint 的下载和 load 逻辑.
     output_dir = Path(args.output_dir)
     if args.resume:
         if args.resume.startswith('https'):
@@ -345,6 +371,7 @@ def main(args):
                 loss_scaler.load_state_dict(checkpoint['scaler'])
         lr_scheduler.step(args.start_epoch)
     
+    # 在 test_only 的指令下, 会把 pred_all.json 文件生成在 output_dir 目录下.
     if args.test_only:
         # the format of submitted json
         # {
@@ -364,14 +391,16 @@ def main(args):
             json.dump(result_list, f)
         return
 
+    # args.eval: 表明只做 evaluation, 不做 training.
     if args.eval:
         for dataset_id, data_loader_val in enumerate(data_loader_val_list):
-            test_stats = evaluate(data_loader_val, model, device, dataset_id)
+            test_stats = evaluate(data_loader_val, model, device, dataset_id, args=args)
             print(f"Accuracy of the network on {args.dataset_list[dataset_id]} of {len(dataset_val_total.dataset_list[dataset_id])} "
                     f"test images: {test_stats['acc1']:.1f}%")
 
         return
 
+    # 下面才是正常的训练流程; 其中 train / evaluate / test 等函数都在 engine.py 中定义好了.
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     max_accuracy = 0.0
@@ -401,12 +430,13 @@ def main(args):
                     'scaler': loss_scaler.state_dict(),
                     'args': args,
                 }, checkpoint_path)
-             
+        
+        # 每 10 个 epochs 做一次 evaluate, 在 validation set 上面.
         if (epoch + 1) % 10 == 0 or epoch + 1 == args.epochs :
             test_stats_total = {}
             test_stats_list = []
             for dataset_id, data_loader_val in enumerate(data_loader_val_list):
-                test_stats = evaluate(data_loader_val, model, device, dataset_id)
+                test_stats = evaluate(data_loader_val, model, device, dataset_id, args=args)
                 test_stats_list.append(test_stats)
                 print(f"Accuracy of the network on {args.dataset_list[dataset_id]} of {len(dataset_val_total.dataset_list[dataset_id])} test images: {test_stats['acc1']:.1f}%")
                 for k, v in test_stats.items():
