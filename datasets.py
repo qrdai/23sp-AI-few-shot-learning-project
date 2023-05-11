@@ -19,10 +19,13 @@ import itertools
 class MultiImageFolder(data.Dataset):
     def __init__(self, dataset_list, transform, loader = default_loader, 
                     known_data_source=True, is_test=False) -> None:
+        '''dataset_list 中的每个 dataset, 现在都是 ImageFolder 类的数据集'''
         super().__init__()
         self.loader = loader
         self.transform = transform
 
+        # samples_list 与 classes_list 都是列表嵌套列表
+        # [ [<samples of 1st dataset>], [samples of 2nd dataset] ... ]
         samples_list = [x.samples for x in dataset_list]
         classes_list = [x.classes for x in dataset_list]
         self.classes_list = classes_list
@@ -32,13 +35,19 @@ class MultiImageFolder(data.Dataset):
         start_id = 0
         self.samples = []
         for dataset_id, (samples, classes) in enumerate(zip(samples_list, classes_list)) :
+            # 现在的 samples 就是某一个特定数据集的所有 (sample path, class_index), 是 List[Tuple[str, int]].
             for i, data in enumerate(samples):
                 if not is_test:
                     # concat the taxonomy of all datasets
-                    img, target = data[:2]
+                    img, target = data[:2]  # 这里的 target 本身是 int, 并不是 one-hot label 的形式.
                     self.samples.append((img, target+start_id, dataset_id))
+                    
+                    # 在更新完 multiImgaeFolder 自己的 self.samples 后, 也把输入参数 dataset_list
+                    # 里面的 dataset.samples 的元素改成 (img, target+start_id), 即更新它们的 target 值.
                     samples[i] = (img, target+start_id)
                 else :
+                    # 由于 Testfolder.samples 本身就只有 img 没有 target,
+                    # 因此 Test_MultiImageFolder 也只有 img 没有 target.
                     img = data
                     self.samples.append((img, None, dataset_id))
             start_id += len(classes)
@@ -57,8 +66,11 @@ class MultiImageFolder(data.Dataset):
         sample = self.loader(path)
 
         if self.transform is not None:
-            sample = self.transform(sample)
+            sample = self.transform(sample) # 数据集的 transform 在 MultiImageFolder 取数据的同时才会做.
 
+        # 返回的数据类型 (tensor, int tensor, int number)
+        # TODO(BY DQR): 需要把 target 变为 one-hot label(总长度和 dataset_list 中总类数相同), 
+        # 否则 CrossEntropyLoss 的 output 和 target 维度对不上.
         return sample, target, dataset_id
 
 
@@ -120,8 +132,11 @@ def build_dataset(is_train, args):
             dataset_list.append(dataset)
             nb_classes += len(dataset.classes)
 
+        # MultiImageFolder 的 is_test 默认为 False.
         multi_dataset = MultiImageFolder(dataset_list, transform, known_data_source=args.known_data_source)
 
+        # 不管是 train / test, 最后返回的都是 args.dataset_list 中所有数据集的所有 (sample, target, dataset_id)
+        # 所组成的一个 MultiImgaeFolder; 以及所有数据集加起来的总 classes 数目.
         return multi_dataset, nb_classes
 
 
