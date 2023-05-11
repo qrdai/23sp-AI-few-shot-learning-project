@@ -38,7 +38,7 @@ class CustomClassifier(torch.nn.Module):
         self.backbone = model
 
         self.known_data_source = known_data_source
-        self.multi_dataset_classes = multi_dataset_classes
+        self.multi_dataset_classes = multi_dataset_classes  # 一个 list, 包含各数据集 classes 数目.
         self.channel_bn = torch.nn.BatchNorm1d(
             input_dim,
             affine=False,
@@ -46,11 +46,15 @@ class CustomClassifier(torch.nn.Module):
         self.layers = torch.nn.Sequential(torch.nn.Linear(input_dim, output_dim))
 
     def forward(self, img, dataset_id=None):
-        # TODO: how to leverage dataset_source in training and infernece stage?
+        # TODO: how to leverage dataset_source in training and inference stage?
         pdtype = img.dtype
         feature = self.backbone.forward_features(img).to(pdtype)
-        outputs = self.channel_bn(feature)
-        outputs = self.layers(outputs)
+        print("DEBUGGING: ViT FEATURE SHAPE =", feature.shape)
+        # ViT/DeiT 类模型 forward_features 输出的形状为 (N,L,C), 即 (batch_size, sentence_length, embedding_dim);
+        # 而 batchnorm1d 接收的输入形状为 (N,C,L), 因此需要翻转后面两维度;
+        outputs = self.channel_bn(torch.transpose(feature, 1, 2))
+        # 最后输出线性层之前再翻转回来;
+        outputs = self.layers(torch.transpose(outputs, 1, 2))
         return outputs
 
 
@@ -154,7 +158,8 @@ def get_args_parser():
     parser.add_argument('--finetune', default='', help='finetune from checkpoint')
     
     # Dataset parameters
-    parser.add_argument('--data-path', default='/datasets01/imagenet_full_size/061417/', type=str,
+    # modif: 已经把默认的 data_path 换为数据集所在目录.
+    parser.add_argument('--data-path', default='/remote-home/share/course23/aicourse_dataset_final/', type=str,
                         help='dataset path')
     parser.add_argument('--data-set', default='IMNET', choices=['CIFAR', 'IMNET', 'INAT', 'INAT19'],
                         type=str, help='Image Net dataset path')
@@ -173,7 +178,7 @@ def get_args_parser():
     parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
     parser.add_argument('--eval-crop-ratio', default=0.875, type=float, help="Crop ratio for evaluation")
     parser.add_argument('--dist-eval', action='store_true', default=False, help='Enabling distributed evaluation')
-    parser.add_argument('--num_workers', default=10, type=int)
+    parser.add_argument('--num_workers', default=4, type=int)
     parser.add_argument('--pin-mem', action='store_true',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
     parser.add_argument('--no-pin-mem', action='store_false', dest='pin_mem',
@@ -271,12 +276,14 @@ def main(args):
     
     # Create a model with the timm function; any other model pre-trained under ImageNet-1k is allowed.
     model = create_model(args.model, num_classes=args.nb_classes, pretrained=True)
+    print("DEBUGGING: Model.embed_dim =", model.embed_dim)
     
     # number of classes for each dataset
     multi_dataset_classes = [len(x) for x in dataset_train.classes_list]
 
+    # 在 model 的最后加上一个线性分类头: 包含一层 batchnorm + FC线性层.
     model = CustomClassifier(model, model.embed_dim, args.nb_classes, multi_dataset_classes=multi_dataset_classes, known_data_source=args.known_data_source)
-                    
+
     model.to(device)
 
     model_ema = None
