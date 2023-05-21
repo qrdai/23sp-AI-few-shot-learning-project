@@ -74,6 +74,10 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
 
 @torch.no_grad()
 def evaluate(data_loader, model, device, dataset_id=None, dump_result=False, args = None):
+    '''known_dataset_source 与否对 evaluate 没有区别:
+    在验证集上 evaluate 时, 总归是产生 output tensor, 并与验证集包含的 target tensor 作交叉熵比较;
+    关键还是在于 model.forward(images, dataset_id), 它们产生了 output, 它们可以根据 dataset_id 来决定 output 的
+    维度大小 / 哪些维度强制为0 等额外约束, 使得交叉熵损失进一步减小.'''
     criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -123,7 +127,10 @@ def evaluate(data_loader, model, device, dataset_id=None, dump_result=False, arg
 
 @torch.no_grad()
 def test(data_loader, model, device, dataset_id=None, num_classes_list=None, know_dataset=True):
-
+    '''known_dataset_source 与否对 test 有区别, 这决定了我们在给出 prediction(pred_all.json) 的时候怎么取预测值.
+    如果 known_dataset_source = False, 那么 output 的维度一定是最大的 645, prediction 的选取也是在这所有 645 个值中选最大;
+    如果 known_dataset_source = True, 那么传入的参数 dataset_id 就有用了, 既可以缩小 prediction 的选取范围从而与对应子数据集对应,
+    又可以在产生 output 的 forward 过程中作为参数, 指导产生的 output 值.'''
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Test:'
 

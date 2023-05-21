@@ -14,7 +14,7 @@ pip install -r requirements.txt
 Loading pre-trained weights is allowed. You can use the pre-trained model under **ImageNet-1k**, while other datasets like ImageNet-21k, CC3M, LAION, etc., are not allowed.
 
 ## Datasets
-Five datasets are given, which include:
+Five datasets are given in ```/remote-home/share/course23```, which include:
 '10shot_cifar100_20200721','10shot_country211_20210924','10shot_food_101_20211007','10shot_oxford_iiit_pets_20211007','10shot_stanford_cars_20211007'                        
 
 ## Run
@@ -30,9 +30,9 @@ There are three modes to execute the code.
 
 After obtaining the checkpoint of certain modes, you should operate ```--test_only``` to produce a prediction json file ```pred_all.json```. The file will be produced under your output directory. 
 ```Shell
-python main.py --model $selected_model --batch-size 64 --data-path $path_to_dataset --output_dir output/$selected_model --epochs 50 --lr 1e-4 --weight-decay 0.01 --test_only
+python main.py --model $selected_model --batch-size 64 --data-path $path_to_dataset --output_dir output/$selected_model --epochs 50 --lr 1e-4 --weight-decay 0.01 --test_only --resume /path/of/your/trained/model
 ```
 
 ## Submit
-You should submit a zip file containing the ```pred_all.json``` file into the colab website. 
+You should submit a zip file containing the ```pred_all.json``` file into the [colab websit](https://codalab.lisn.upsaclay.fr/competitions/12725?secret_key=64e1ce9f-10fd-4a9a-b07c-f94d81946931). 
 

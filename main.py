@@ -46,7 +46,8 @@ class CustomClassifier(torch.nn.Module):
         self.layers = torch.nn.Sequential(torch.nn.Linear(input_dim, output_dim))
 
     def forward(self, img, dataset_id=None):
-        '''dataset_id 这个 input 目前没有被用到; 后续改进时需要思考如何使用它.'''
+        '''dataset_id 这个 input 目前没有被用到; 后续改进时需要思考如何使用它.
+        model 应该根据 self.known_data_source 是否为 True 来决定是否能在 forward 中使用 dataset_id 的信息.'''
         # TODO: how to leverage dataset_source in training and inference stage?
         pdtype = img.dtype
         feature = self.backbone.forward_features(img).to(pdtype)
@@ -203,6 +204,8 @@ def main(args):
     utils.init_distributed_mode(args)
 
     print(args)
+    # print(args.known_data_source)
+    # return
 
     device = torch.device(args.device)
 
