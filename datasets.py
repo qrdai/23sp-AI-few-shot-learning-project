@@ -19,7 +19,8 @@ import itertools
 class MultiImageFolder(data.Dataset):
     def __init__(self, dataset_list, transform, loader = default_loader, 
                     known_data_source=True, is_test=False) -> None:
-        '''输入的 dataset_list 中的每个 dataset, 都是 ImageFolder 类的数据集'''
+        '''输入的 dataset_list 中的每个 dataset, 都是 ImageFolder 类的数据集
+        TODO: 目前的 MultiImageFolder, 并没有根据 known_dataset_source与否 来改变生成的数据集.'''
         super().__init__()
         self.loader = loader
         self.transform = transform
@@ -147,10 +148,10 @@ def build_transform(is_train, args, img_size=224,
         t = []
         t.append(transforms.Resize(img_size))
         t.append(transforms.CenterCrop(img_size))
-        if args.flip:
+        if args.flip:   # no flip by default
             t.append(transforms.RandomVerticalFlip(p = args.flip))
             t.append(transforms.RandomHorizontalFlip(p = args.flip))
-        if args.rotation:
+        if args.rotation:   # no rotation by default
             t.append(transforms.RandomRotation(args.rotation))
         t.append(transforms.ToTensor())
         t.append(transforms.Normalize(mean, std))

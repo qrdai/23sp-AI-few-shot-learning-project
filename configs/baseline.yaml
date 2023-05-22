@@ -1,0 +1,88 @@
+# Fundamental training parameters:
+test_only: False
+known_data_source: True
+dataset_list: ['10shot_cifar100_20200721', '10shot_country211_20210924', '10shot_food_101_20211007', '10shot_oxford_iiit_pets_20211007', '10shot_stanford_cars_20211007']
+nb_classes: null
+batch_size: 96
+start_epoch: 0
+epochs: 50
+test_interval: 5  # for wandb test
+bce_loss: False
+unscale_lr: False
+
+# Model Parameters:
+model: deit_small_patch16_224
+input_size: 224
+drop: 0.0
+drop_path: 0.1
+model_ema: True
+model_ema_decay: 0.99996
+model_ema_force_cpu: False
+opt: adamw
+opt_eps: 1e-8
+clip_grad: null
+momentum: 0.9
+weight_decay: 0.0
+
+# Learning rate schedule parameters
+sched: cosine
+lr: 1e-4
+lr_noise: null
+lr_noise_pct: 0.67
+lr_noise_std: 1.0
+warmup_lr: 1e-6
+min_lr: 1e-5
+
+decay_epochs: 0
+warmup_epochs: 0
+cooldown_epochs: 0
+patience_epochs: 0
+decay_rate: 0.1
+
+# Augmentation parameters
+color_jitter: 0.3
+aa: rand-m9-mstd0.5-inc1
+smoothing: 0
+train_interpolation: bicubic
+repeated_aug: True
+train_mode: True
+src: False
+flip: False  # 3. augment-1
+rotation: False  # 4. augment-2
+
+# * Finetuning params
+# finetune: ''
+
+# Dataset parameters
+data_path: /remote-home/share/course23/aicourse_dataset_final/
+data_set: IMNET
+inat_category: name
+output_dir: output/deit_small_patch16_224/B_batch_size_96 # 1. needs to be customized each run.
+device: cuda
+seed: 0
+resume: '' # 2. needs to be customized each run.
+eval: False
+eval_crop_ratio: 0.875
+dist_eval: False
+num_workers: 0  # 5. to prevent dataloader from being killed.
+pin_mem: True
+
+# wandb parameters:
+wandb:
+  setup:
+      project: aicourse
+      entity: raidriar_dai
+      mode: online # may trigger network error
+  watch:
+      log: all
+      log_freq: 100
+
+# distributed training parameters
+distributed: False
+world_size: 1
+dist_url: env://
+
+# Hydra parameters:
+hydra:
+  run:
+    dir: logs

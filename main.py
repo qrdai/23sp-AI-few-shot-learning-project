@@ -27,6 +27,12 @@ import models
 import utils
 import random
 
+# integrate with wandb and hydra
+import hydra
+import wandb
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
+
 
 class CustomClassifier(torch.nn.Module):
     def __init__(self, model, input_dim, output_dim, 
@@ -51,17 +57,13 @@ class CustomClassifier(torch.nn.Module):
         # TODO: how to leverage dataset_source in training and inference stage?
         pdtype = img.dtype
         feature = self.backbone.forward_features(img).to(pdtype)
-        # print(f'DEBUGGING: feature.shape = {feature.shape}')
 
         # ViT/DeiT 类模型 forward_features 输出的 feature 形状为 (N,L,C), 即 (batch_size, sentence_length, embedding_dim);
         # 而 batchnorm1d 接收的输入形状为 (N,C) 或 (N,C,L);
         # 我们这里只需要 deit 输出的 cls_token, 经查阅源码, cls_token 被 concat 在输入 seq 的第一位.
         feature = torch.squeeze(feature[:, 0, :], dim=1)    # 现在 feature 的形状应为 64*192.
-        # print(f'DEBUGGING: feature = {feature}')
-        # print(f'DEBUGGING: feature.shape = {feature.shape}')
         outputs = self.channel_bn(feature)
         outputs = self.layers(outputs)
-        # print(f'DEBUGGING: outputs.dtype = {outputs.dtype}')
         return outputs
 
 
@@ -95,10 +97,10 @@ def get_args_parser():
     parser.add_argument('--model-ema-force-cpu', action='store_true', default=False, help='')
 
     # Optimizer parameters
-    # parser.add_argument('--opt', default='adamw', type=str, metavar='OPTIMIZER',
-    #                     help='Optimizer (default: "adamw"')
-    # parser.add_argument('--opt-eps', default=1e-8, type=float, metavar='EPSILON',
-    #                     help='Optimizer Epsilon (default: 1e-8)')
+    parser.add_argument('--opt', default='adamw', type=str, metavar='OPTIMIZER',
+                        help='Optimizer (default: "adamw"')
+    parser.add_argument('--opt-eps', default=1e-8, type=float, metavar='EPSILON',
+                        help='Optimizer Epsilon (default: 1e-8)')
     # parser.add_argument('--opt-betas', default=None, type=float, nargs='+', metavar='BETA',
     #                     help='Optimizer Betas (default: None, use opt default)')
     parser.add_argument('--clip-grad', type=float, default=None, metavar='NORM',
@@ -107,6 +109,7 @@ def get_args_parser():
                         help='SGD momentum (default: 0.9)')
     parser.add_argument('--weight-decay', type=float, default=0.05,
                         help='weight decay (default: 0.05)')
+
     # Learning rate schedule parameters
     parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
                         help='LR scheduler (default: "cosine"')
@@ -199,13 +202,24 @@ def get_args_parser():
     return parser
 
 
-def main(args):
+@hydra.main(version_base=None, config_path="configs/", config_name="baseline")  # modif 1
+def main(args) -> None:
+    
+    # modif 4: 把 wandb 接入 Hydra config files
+    wandb_cfg = OmegaConf.to_container(
+        args, resolve=True, throw_on_missing=True
+    )
+    wandb.init(entity=args.wandb.setup.entity, project=args.wandb.setup.project, config=wandb_cfg)
+    
+    # 把原来 main 函数外的 mkdir 操作封装到 main 函数中完成.
+    if args.output_dir:
+        Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    
     print(args.dataset_list)
     utils.init_distributed_mode(args)
 
-    print(args)
-    # print(args.known_data_source)
-    # return
+    print(OmegaConf.to_yaml(args))  # modif 2
+    # print(args)
 
     device = torch.device(args.device)
 
@@ -344,6 +358,9 @@ def main(args):
     )
 
     loss_scaler = NativeScaler()
+    
+    # create_scheduler 函数根据 args.sched 参数, 返回不同种类的 lr_scheduler;
+    # 默认的是 cosine.
     lr_scheduler, _ = create_scheduler(args, optimizer)
     
     if args.smoothing:
@@ -399,7 +416,7 @@ def main(args):
         for dataset_id, data_loader_val in enumerate(data_loader_val_list):
             test_stats = evaluate(data_loader_val, model, device, dataset_id, args=args)
             print(f"Accuracy of the network on {args.dataset_list[dataset_id]} of {len(dataset_val_total.dataset_list[dataset_id])} "
-                    f"test images: {test_stats['acc1']:.1f}%")
+                    f"test images: {test_stats[f'dataset_{dataset_id}_test_acc1']:.1f}%")
 
         return
 
@@ -434,18 +451,18 @@ def main(args):
                     'args': args,
                 }, checkpoint_path)
         
-        # 每 10 个 epochs 做一次 evaluate, 在 validation set 上面.
-        if (epoch + 1) % 10 == 0 or epoch + 1 == args.epochs :
+        # 默认每 10 个 epochs 在 validation set 上做一次 evaluate.
+        if (epoch + 1) % args.test_interval == 0 or epoch + 1 == args.epochs :
             test_stats_total = {}
             test_stats_list = []
             for dataset_id, data_loader_val in enumerate(data_loader_val_list):
                 test_stats = evaluate(data_loader_val, model, device, dataset_id, args=args)
                 test_stats_list.append(test_stats)
-                print(f"Accuracy of the network on {args.dataset_list[dataset_id]} of {len(dataset_val_total.dataset_list[dataset_id])} test images: {test_stats['acc1']:.1f}%")
+                print(f"Accuracy of the network on {args.dataset_list[dataset_id]} of {len(dataset_val_total.dataset_list[dataset_id])} test images: {test_stats[f'dataset_{dataset_id}_test_acc1']:.1f}%")
                 for k, v in test_stats.items():
                     test_stats_total['dataset_{}_{}'.format(args.dataset_list[dataset_id], k)] = v
 
-            sum_acc = sum([x['acc1'] for x in test_stats_list])
+            sum_acc = sum([x[f'dataset_{dataset_id}_test_acc1'] for dataset_id, x in enumerate(test_stats_list)])
             if max_accuracy < sum_acc:
                 max_accuracy = sum_acc
                 if args.output_dir:
@@ -475,11 +492,16 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
+    
+    wandb.finish()
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser('DeiT training and evaluation script', parents=[get_args_parser()])
-    args = parser.parse_args()
-    if args.output_dir:
-        Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-    main(args)
+    # parser = argparse.ArgumentParser('DeiT training and evaluation script', parents=[get_args_parser()])
+    # args = parser.parse_args()
+    # if args.output_dir:
+    #     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    # main(args)
+    
+    # 用了 Hydra 之后, args 参数由 Hydra 根据 config 文件自动生成.
+    main()  # modif 3

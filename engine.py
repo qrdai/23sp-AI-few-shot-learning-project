@@ -15,6 +15,8 @@ from timm.utils import accuracy, ModelEma
 from losses import DistillationLoss
 import utils
 
+import wandb
+
 
 def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
@@ -23,6 +25,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
                     class_indicator=None):
     model.train(set_training_mode)
     metric_logger = utils.MetricLogger(delimiter="  ")
+    # 第一个 meter: lr; 规定了 fmt 的格式: 只有每次的精确值; 不像 loss 所采用的默认格式: median (global_avg)
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10 # 每 <print_freq> 个 iterations 输出一次实验结果.
@@ -36,16 +39,19 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
             targets = targets.gt(0.0).type(targets.dtype)
         with torch.cuda.amp.autocast():
             outputs = model(samples, dataset_ids)
+            # 默认情况下没有 class_indicatior, 但 class_indicator 似乎可以根据标签 targets 的取值区间,
+            # 来确定当前 outputs 属于哪个 dataset_id; 之后再把下标不在该 dataset_id 范围内的 outputs 输出元素值
+            # 置为极小值 -100, 从而提高 outputs 选出正确 class_label 的概率.
+            # 这样做的目的是: 在 known_dataset_source 的情况下, 为 outputs 提前排除一些错误答案, 从而减小 train_loss,
+            # 使得 train_loss 的优化更容易朝向正确的方向; 这也与 test 中选取 result_label 的过程形成一致.
+            # TODO 1: 为什么不直接用 dataset_id 作为 class_indicator ? 该操作能否在 model.forward 内实现?
+            # TODO 2: 在 evaluate 中得到 outputs 之后, 也应该作用同样的操作.
             if class_indicator is not None :
                 mask = class_indicator[targets]
-                outputs[~mask.bool()] = -1e2
+                outputs[~mask.bool()] = -1e2 # applying bitwise negation to the binary representation of mask.bool()
 
-            # one_hot_targets = torch.nn.functional.one_hot(
-            #     targets, num_classes=args.nb_classes
-            # )
-            # print(f'DEBUGGING: outputs.shape = {outputs.shape}, targets.shape = {one_hot_targets.shape}')
-            # loss = criterion(outputs, one_hot_targets)
             loss = criterion(outputs, targets)
+            acc1, acc5 = accuracy(outputs, targets, topk=(1, 5))
 
         loss_value = loss.item()
 
@@ -64,18 +70,28 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
         if model_ema is not None:
             model_ema.update(model)
 
-        metric_logger.update(loss=loss_value)
+        # 每个 iteration 更新一次 loss 与 lr;
+        # 第二个 meter: loss. loss 是由 metric_logger.update() 新创建的, 具体原理是:
+        # metric_logger.update(loss=loss_value) 调用了 self.meters[loss].update(loss_value),
+        # 这就进一步调用了 self.meters: DefaultDict 的默认 key-value 生成方法: SmoothedValue, 
+        # 因此生成的以 loss 为 key 的 meter 用的是 SmoothedValue 类的默认输出格式.
+        metric_logger.update(train_loss=loss_value)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        batch_size = args.batch_size
+        metric_logger.meters['train_acc1'].update(acc1.item(), n=batch_size)
+        metric_logger.meters['train_acc5'].update(acc5.item(), n=batch_size)
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    avg_stat_per_epoch = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    wandb.log(avg_stat_per_epoch)
+    return avg_stat_per_epoch
 
 
 @torch.no_grad()
 def evaluate(data_loader, model, device, dataset_id=None, dump_result=False, args = None):
-    '''known_dataset_source 与否对 evaluate 没有区别:
-    在验证集上 evaluate 时, 总归是产生 output tensor, 并与验证集包含的 target tensor 作交叉熵比较;
+    '''known_dataset_source 与否对 evaluate 没有区别: 因为 evaluation 时仍然知道 target,
+    所以正常地用 output 与 target 计算 loss 与 accuracy 即可.
     关键还是在于 model.forward(images, dataset_id), 它们产生了 output, 它们可以根据 dataset_id 来决定 output 的
     维度大小 / 哪些维度强制为0 等额外约束, 使得交叉熵损失进一步减小.'''
     criterion = torch.nn.CrossEntropyLoss()
@@ -110,19 +126,26 @@ def evaluate(data_loader, model, device, dataset_id=None, dump_result=False, arg
             loss = criterion(output, target)
             acc1, acc5 = accuracy(output, target, topk=(1, 5))
             batch_size = images.shape[0]
-            metric_logger.update(loss=loss.item())
-            metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
-            metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
+            # metric_logger.update(test_loss=loss.item())
+            metric_logger.meters[f'dataset_{dataset_id}_test_loss'].update(loss.item())
+            metric_logger.meters[f'dataset_{dataset_id}_test_acc1'].update(acc1.item(), n=batch_size)
+            metric_logger.meters[f'dataset_{dataset_id}_test_acc5'].update(acc5.item(), n=batch_size)
 
     if dump_result :
         return result_json
     else :
         # gather the stats from all processes
         metric_logger.synchronize_between_processes()
-        print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
-            .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss))
+        # print('* Test_Acc@1 {top1.global_avg:.3f} Test_Acc@5 {top5.global_avg:.3f} Test_loss {losses.global_avg:.3f}'
+        #     .format(top1=metric_logger.test_acc1, top5=metric_logger.test_acc5, losses=metric_logger.test_loss))
+        print('* Test_Acc@1 {top1.global_avg:.3f} Test_Acc@5 {top5.global_avg:.3f} Test_loss {losses.global_avg:.3f}'
+            .format(top1=getattr(metric_logger, f'dataset_{dataset_id}_test_acc1'), 
+                    top5=getattr(metric_logger, f'dataset_{dataset_id}_test_acc5'), 
+                    losses=getattr(metric_logger, f'dataset_{dataset_id}_test_loss')))
 
-        return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+        avg_stat_per_epoch = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+        wandb.log(avg_stat_per_epoch)
+        return avg_stat_per_epoch
 
 
 @torch.no_grad()

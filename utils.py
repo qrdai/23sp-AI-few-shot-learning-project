@@ -79,7 +79,7 @@ class SmoothedValue(object):
 
 class MetricLogger(object):
     def __init__(self, delimiter="\t"):
-        self.meters = defaultdict(SmoothedValue)
+        self.meters = defaultdict(SmoothedValue)    # meters 的默认返回值是 SmoothedValue 类.
         self.delimiter = delimiter
 
     def update(self, **kwargs):
@@ -98,6 +98,10 @@ class MetricLogger(object):
             type(self).__name__, attr))
 
     def __str__(self):
+        '''1. 在 str() 函数中被调用; 2. 在 print() 函数中被调用.
+        都是把 self.meters 的所有内容格式化输出.
+        注意: log_msg.format() -> str(self: MetricLogger) -> str(meter: SmoothedValue)
+        一层层下放输出字符串的组成逻辑.'''
         loss_str = []
         for name, meter in self.meters.items():
             loss_str.append(
@@ -109,6 +113,7 @@ class MetricLogger(object):
         for meter in self.meters.values():
             meter.synchronize_between_processes()
 
+    # self.meters 的 value 类型也是 SmoothedValue 类.
     def add_meter(self, name, meter):
         self.meters[name] = meter
 
