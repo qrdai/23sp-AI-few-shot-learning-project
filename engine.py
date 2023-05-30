@@ -39,13 +39,6 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
             targets = targets.gt(0.0).type(targets.dtype)
         with torch.cuda.amp.autocast():
             outputs = model(samples, dataset_ids)
-            # 默认情况下没有 class_indicatior, 但 class_indicator 似乎可以根据标签 targets 的取值区间,
-            # 来确定当前 outputs 属于哪个 dataset_id; 之后再把下标不在该 dataset_id 范围内的 outputs 输出元素值
-            # 置为极小值 -100, 从而提高 outputs 选出正确 class_label 的概率.
-            # 这样做的目的是: 在 known_dataset_source 的情况下, 为 outputs 提前排除一些错误答案, 从而减小 train_loss,
-            # 使得 train_loss 的优化更容易朝向正确的方向; 这也与 test 中选取 result_label 的过程形成一致.
-            # TODO 1: 为什么不直接用 dataset_id 作为 class_indicator ? 该操作能否在 model.forward 内实现?
-            # TODO 2: 在 evaluate 中得到 outputs 之后, 也应该作用同样的操作.
             if class_indicator is not None :
                 mask = class_indicator[targets]
                 outputs[~mask.bool()] = -1e2 # applying bitwise negation to the binary representation of mask.bool()

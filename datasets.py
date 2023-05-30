@@ -24,6 +24,12 @@ class MultiImageFolder(data.Dataset):
         super().__init__()
         self.loader = loader
         self.transform = transform
+        self.std_transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            # transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD)
+        ])
 
         # samples_list 与 classes_list 都是列表嵌套列表
         # [ [<samples of 1st dataset>], [samples of 2nd dataset] ... ]
@@ -69,7 +75,11 @@ class MultiImageFolder(data.Dataset):
         sample = self.loader(path)
 
         if self.transform is not None:
-            sample = self.transform(sample) # 数据集的 transform 在 MultiImageFolder 取数据的同时才会做.
+            # 1/3 的概率下, 不做 augmentation, 返回原图;
+            if torch.rand(1).item() < 0.333:
+                sample = self.std_transform(sample)
+            else:
+                sample = self.transform(sample) # 数据集的 transform 在 MultiImageFolder 取数据的同时才会做.
 
         # 返回的数据类型 (tensor, int tensor, int number)
         return sample, target, dataset_id
@@ -144,22 +154,25 @@ def build_dataset(is_train, args):
 def build_transform(is_train, args, img_size=224,
                         mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD):
     # TODO: does any other data augmentation work better?
+    # 只有在 train 时才做 augmentation; val 与 test 时都不做 augmentation.
     if is_train:
         t = []
-        t.append(transforms.Resize(img_size))
-        t.append(transforms.CenterCrop(img_size))
-        if args.flip:   # no flip by default
-            t.append(transforms.RandomVerticalFlip(p = args.flip))
-            t.append(transforms.RandomHorizontalFlip(p = args.flip))
-        if args.rotation:   # no rotation by default
-            t.append(transforms.RandomRotation(args.rotation))
+        t.append(transforms.Resize((img_size, img_size)))
+        # t.append(transforms.CenterCrop(img_size))
+        # if args.flip:   # no flip by default
+        #     t.append(transforms.RandomVerticalFlip(p = args.flip))
+        #     t.append(transforms.RandomHorizontalFlip(p = args.flip))
+        # if args.rotation:   # no rotation by default
+        #     t.append(transforms.RandomRotation(args.rotation))
+        if args.rand_aug:
+            t.append(transforms.RandAugment(num_ops=3, magnitude=6))
         t.append(transforms.ToTensor())
         t.append(transforms.Normalize(mean, std))
         return transforms.Compose(t)
 
     t = []
-    t.append(transforms.Resize(img_size))
-    t.append(transforms.CenterCrop(img_size))
+    t.append(transforms.Resize((img_size, img_size)))
+    # t.append(transforms.CenterCrop(img_size))
     t.append(transforms.ToTensor())
     t.append(transforms.Normalize(mean, std))
     return transforms.Compose(t)

@@ -8,12 +8,12 @@ import torch
 import operator
 import torch.backends.cudnn as cudnn
 import json
+# import timm.models
 
 from pathlib import Path
 
 from timm.data import Mixup
 from timm.models import create_model
-import timm.models
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
@@ -36,35 +36,65 @@ from omegaconf import OmegaConf
 
 class CustomClassifier(torch.nn.Module):
     def __init__(self, model, input_dim, output_dim, 
-                    multi_dataset_classes=None, known_data_source=False):
+                    multi_dataset_classes=None, known_data_source=False, model_name=None):
         '''
         Custom classifier with a Norm layer followed by a Linear layer.
         '''
         super().__init__()
         self.backbone = model
+        self.model_name = model_name
 
         self.known_data_source = known_data_source
         self.multi_dataset_classes = multi_dataset_classes  # 一个 list, 包含各数据集 classes 数目.
+        
         self.channel_bn = torch.nn.BatchNorm1d(
             input_dim,
             affine=False,
         )
-        self.layers = torch.nn.Sequential(torch.nn.Linear(input_dim, output_dim))
+        self.channel_pool = torch.nn.Sequential(
+            torch.nn.AdaptiveAvgPool2d(output_size=1),
+            torch.nn.Flatten(start_dim=1)
+        )
+        
+        self.head = torch.nn.Linear(input_dim, output_dim)
+        self.head_dist = torch.nn.Linear(input_dim, output_dim)
 
     def forward(self, img, dataset_id=None):
         '''dataset_id 这个 input 目前没有被用到; 后续改进时需要思考如何使用它.
         model 应该根据 self.known_data_source 是否为 True 来决定是否能在 forward 中使用 dataset_id 的信息.'''
         # TODO: how to leverage dataset_source in training and inference stage?
+        # timm models 的 forward 分为 forward_features 与 forward_head 两部分; 
+        # forward_features 返回 backbone 处理好的 representation; forward_head 再把它送入最后的线性分类头输出分类向量.
         pdtype = img.dtype
         feature = self.backbone.forward_features(img).to(pdtype)
 
-        # ViT/DeiT 类模型 forward_features 输出的 feature 形状为 (N,L,C), 即 (batch_size, sentence_length, embedding_dim);
-        # 而 batchnorm1d 接收的输入形状为 (N,C) 或 (N,C,L);
-        # 我们这里只需要 deit 输出的 cls_token, 经查阅源码, cls_token 被 concat 在输入 seq 的第一位.
-        feature = torch.squeeze(feature[:, 0, :], dim=1)    # 现在 feature 的形状应为 64*192.
-        outputs = self.channel_bn(feature)
-        outputs = self.layers(outputs)
-        return outputs
+        # 1. vit/deit(no distillation): 只有 cls_token
+        if self.model_name in {'deit_small_patch16_224', 'deit_base_patch16_224'}:
+            outputs = self.channel_bn(torch.squeeze(feature[:, 0, :], dim=1))
+            outputs = self.head(outputs)
+            return outputs
+
+        # 2. deit(distilled): cls_token + dist_token
+        elif self.model_name in {'deit_small_distilled_patch16_224', 'deit_base_distilled_patch16_224'}:
+            cls, dist = feature[:, 0], feature[:, 1]
+            cls = self.head(cls)
+            dist = self.head_dist(dist)
+            return (cls + dist) / 2
+
+        # 3. swin-transformer: (N,L,C) + mean(dim=1)
+        elif self.model_name in {'swin_tiny_patch4_window7_224', 'swin_small_patch4_window7_224'}:
+            feature = feature.mean(dim=1)
+            feature = self.head(feature)
+            return feature
+
+        # 4. EfficientNet 类模型 forward_features 输出的形状为 (N, 1280, H, W);
+        elif 'efficientnet' in self.model_name:
+            outputs = self.channel_pool(feature)
+            outputs = self.head(outputs)
+            return outputs
+        
+        else:
+            return NotImplementedError
 
 
 def get_args_parser():
@@ -202,7 +232,7 @@ def get_args_parser():
     return parser
 
 
-@hydra.main(version_base=None, config_path="configs/", config_name="baseline")  # modif 1
+@hydra.main(version_base=None, config_path="configs/", config_name="test")
 def main(args) -> None:
     
     # modif 4: 把 wandb 接入 Hydra config files
@@ -232,11 +262,9 @@ def main(args) -> None:
     cudnn.benchmark = True
 
     # args.nb_classes 是所有 dataset 的 classes 数目的总和.
-    # build_dataset 返回的是一个 MultiImageFolder, 下面记为 dataset_train.
+    # build_dataset 返回的 dataset_train 是一个 MultiImageFolder.
     dataset_train, args.nb_classes = build_dataset(is_train=True, args=args)
     dataset_val, *_ = build_dataset(is_train=False, args=args)
-    # print(f'DEBUGGING: nb_classes_train == {len(dataset_train.classes)}')
-    # print(f'DEBUGGING: nb_classes_val == {len(dataset_val.classes)}')
 
     # TODO: 搞清楚下面是否只有在 args.distributed = True 的情况下才应该执行;
     if True:  # args.distributed:
@@ -244,7 +272,7 @@ def main(args) -> None:
         global_rank = utils.get_rank()
         if args.repeated_aug:
             sampler_train = RASampler(
-                dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
+                dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True, num_repeats=3
             )
         else:
             sampler_train = torch.utils.data.DistributedSampler(
@@ -313,15 +341,26 @@ def main(args) -> None:
     print(f"Creating model: {args.model}")
     
     # Create a model with the timm function; any other model pre-trained under ImageNet-1k is allowed.
+    # TODO: 任意用 ImageNet-1k 预训练的模型都可以, 也没有限制预训练的方式; 因此不一定要用 timm 提供的预训练参数;
+    # 可以用 supervised-FSL 的方式, 在 imagenet-1k 上有监督地预训练, 之后再利用本任务提供的少量 labeled data 与
+    # 较多 unlabeled data 来 fine-tune.
     model = create_model(args.model, num_classes=args.nb_classes, pretrained=True)
-    # print("DEBUGGING: Model.embed_dim =", model.embed_dim)
     
     # number of classes for each dataset
     multi_dataset_classes = [len(x) for x in dataset_train.classes_list]
 
-    # 在 model 的最后加上一个线性分类头: 包含一层 batchnorm + FC线性层.
-    model = CustomClassifier(model, model.embed_dim, args.nb_classes, multi_dataset_classes=multi_dataset_classes, known_data_source=args.known_data_source)
+    # 1. For vit/deit from timm: 
+    if 'deit' in args.model or 'vit' in args.model:
+        model = CustomClassifier(
+            model, model.embed_dim, args.nb_classes, multi_dataset_classes=multi_dataset_classes, 
+            known_data_source=args.known_data_source, model_name=args.model)
 
+    # 2. For swin-transformer/ConvNets from timm:
+    else:
+        model = CustomClassifier(
+            model, model.num_features, args.nb_classes, multi_dataset_classes=multi_dataset_classes, 
+            known_data_source=args.known_data_source, model_name=args.model)
+    
     model.to(device)
 
     # ema 是 Exponential Moving Average 的简称;

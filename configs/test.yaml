@@ -1,6 +1,8 @@
+# Config file SPECIFIC to `test-only` mode
+
 # Fundamental training parameters:
-test_only: False
-known_data_source: True
+test_only: True
+known_data_source: False
 dataset_list: ['10shot_cifar100_20200721', '10shot_country211_20210924', '10shot_food_101_20211007', '10shot_oxford_iiit_pets_20211007', '10shot_stanford_cars_20211007']
 nb_classes: null
 batch_size: 64
@@ -40,8 +42,9 @@ patience_epochs: 0
 decay_rate: 0.1
 
 # Augmentation parameters
-rand_aug: True  # Set False if do not want any augmentation in training.
-repeated_aug: True # 8. if repeated_aug == False, then the whole training set can be iterated over.
+# 下面两个参数不会对 val/test 产生任何影响.
+rand_aug: False  # Set False if do not want any augmentation in training.
+repeated_aug: False # 8. if repeated_aug == False, then the whole training set can be iterated over.
 color_jitter: 0.3
 aa: rand-m9-mstd0.5-inc1
 smoothing: 0
@@ -58,10 +61,10 @@ rotation: False  # 4. augment-2
 data_path: /remote-home/share/course23/aicourse_dataset_final/
 data_set: IMNET
 inat_category: name
-output_dir: output/swin_tiny_patch4_window7_224/B_repeat-aug-part_2 # 1. needs to be customized each run.
+output_dir: output/swin_tiny_patch4_window7_224/C_repeat-aug-part # 1. needs to be customized each run.
 device: cuda
 seed: 0
-resume: '' # 2. needs to be customized each run.
+resume: 'output/swin_tiny_patch4_window7_224/B_repeat-aug-part/best_checkpoint.pth' # 2. needs to be customized each run.
 eval: False
 eval_crop_ratio: 0.875
 dist_eval: False
