@@ -25,8 +25,8 @@ class MultiImageFolder(data.Dataset):
         self.loader = loader
         self.transform = transform
         self.std_transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            # transforms.CenterCrop(224),
+            transforms.Resize(224),
+            transforms.CenterCrop(224),
             transforms.ToTensor(),
             transforms.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD)
         ])
@@ -157,22 +157,22 @@ def build_transform(is_train, args, img_size=224,
     # 只有在 train 时才做 augmentation; val 与 test 时都不做 augmentation.
     if is_train:
         t = []
-        t.append(transforms.Resize((img_size, img_size)))
-        # t.append(transforms.CenterCrop(img_size))
+        t.append(transforms.Resize(img_size))
+        t.append(transforms.CenterCrop(img_size))
         # if args.flip:   # no flip by default
         #     t.append(transforms.RandomVerticalFlip(p = args.flip))
         #     t.append(transforms.RandomHorizontalFlip(p = args.flip))
         # if args.rotation:   # no rotation by default
         #     t.append(transforms.RandomRotation(args.rotation))
         if args.rand_aug:
-            t.append(transforms.RandAugment(num_ops=3, magnitude=6))
+            t.append(transforms.RandAugment(num_ops=2, magnitude=8))
         t.append(transforms.ToTensor())
         t.append(transforms.Normalize(mean, std))
         return transforms.Compose(t)
 
     t = []
-    t.append(transforms.Resize((img_size, img_size)))
-    # t.append(transforms.CenterCrop(img_size))
+    t.append(transforms.Resize(img_size))
+    t.append(transforms.CenterCrop(img_size))
     t.append(transforms.ToTensor())
     t.append(transforms.Normalize(mean, std))
     return transforms.Compose(t)

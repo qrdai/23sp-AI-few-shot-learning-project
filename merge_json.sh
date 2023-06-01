@@ -2,11 +2,11 @@
 
 # 定义待合并的 .json 文件路径
 json_files=(
-    "output/deit_tiny_patch16_224/A_1_50_epochs/pred_all.json"
-    "output/deit_tiny_patch16_224/A_2_50_epochs/pred_all.json"
-    "output/deit_tiny_patch16_224/A_3_50_epochs/pred_all.json"
-    "output/deit_tiny_patch16_224/A_4_50_epochs/pred_all.json"
-    "output/deit_tiny_patch16_224/A_5_50_epochs/pred_all.json"
+    "output/swin_tiny_patch4_window7_224/A_1_repeat-aug-part/pred_all.json"
+    "output/swin_tiny_patch4_window7_224/A_2_repeat-aug-part/pred_all.json"
+    "output/swin_tiny_patch4_window7_224/A_3_repeat-aug-part/pred_all.json"
+    "output/swin_tiny_patch4_window7_224/A_4_repeat-aug-part/pred_all.json"
+    "output/swin_tiny_patch4_window7_224/A_5_repeat-aug-part/pred_all.json"
 )
 
 # 初始化最大的 n_parameters

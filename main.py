@@ -68,7 +68,7 @@ class CustomClassifier(torch.nn.Module):
         pdtype = img.dtype
         feature = self.backbone.forward_features(img).to(pdtype)
 
-        # 1. vit/deit(no distillation): 只有 cls_token
+        # 1. deit(no distillation): 只有 cls_token
         if self.model_name in {'deit_small_patch16_224', 'deit_base_patch16_224'}:
             outputs = self.channel_bn(torch.squeeze(feature[:, 0, :], dim=1))
             outputs = self.head(outputs)
@@ -87,8 +87,10 @@ class CustomClassifier(torch.nn.Module):
             feature = self.head(feature)
             return feature
 
-        # 4. EfficientNet 类模型 forward_features 输出的形状为 (N, 1280, H, W);
-        elif 'efficientnet' in self.model_name:
+        # 4. EfficientNet/Hybrid: MaxVit forward_features 输出形状为 (N, C, H, W);
+        elif 'efficientnet' in self.model_name or self.model_name in {
+            'maxvit_tiny_rw_224', 'gcvit_tiny', 'gcvit_xtiny', 'gcvit_small'
+        }:
             outputs = self.channel_pool(feature)
             outputs = self.head(outputs)
             return outputs
@@ -349,13 +351,13 @@ def main(args) -> None:
     # number of classes for each dataset
     multi_dataset_classes = [len(x) for x in dataset_train.classes_list]
 
-    # 1. For vit/deit from timm: 
-    if 'deit' in args.model or 'vit' in args.model:
+    # 1. For deit from timm: 
+    if 'deit' in args.model:
         model = CustomClassifier(
             model, model.embed_dim, args.nb_classes, multi_dataset_classes=multi_dataset_classes, 
             known_data_source=args.known_data_source, model_name=args.model)
 
-    # 2. For swin-transformer/ConvNets from timm:
+    # 2. For swin-transformer/MaxVit/ConvNets from timm:
     else:
         model = CustomClassifier(
             model, model.num_features, args.nb_classes, multi_dataset_classes=multi_dataset_classes, 
@@ -419,15 +421,22 @@ def main(args) -> None:
                 args.resume, map_location='cpu', check_hash=True)
         else:
             checkpoint = torch.load(args.resume, map_location='cpu')
-        model_without_ddp.load_state_dict(checkpoint['model'])
-        if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-            args.start_epoch = checkpoint['epoch'] + 1
-            if args.model_ema:
-                utils._load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
-            if 'scaler' in checkpoint:
-                loss_scaler.load_state_dict(checkpoint['scaler'])
+        
+        current_model_dict = model_without_ddp.state_dict()
+        new_state_dict = {k:v if v.size() == current_model_dict[k].size()  else  current_model_dict[k] 
+                          for k,v in zip(current_model_dict.keys(), checkpoint['model'].values())}
+        model.load_state_dict(new_state_dict, strict=False)
+
+        # model_without_ddp.load_state_dict(checkpoint['model'])
+        # if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
+        #     optimizer.load_state_dict(checkpoint['optimizer'])
+        #     lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+        #     args.start_epoch = checkpoint['epoch'] + 1
+        #     if args.model_ema:
+        #         utils._load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
+        #     if 'scaler' in checkpoint:
+        #         loss_scaler.load_state_dict(checkpoint['scaler'])
+        
         lr_scheduler.step(args.start_epoch)
     
     # 在 test_only 的指令下, 会把 pred_all.json 文件生成在 output_dir 目录下.
