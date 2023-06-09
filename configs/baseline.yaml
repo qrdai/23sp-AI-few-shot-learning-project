@@ -2,6 +2,11 @@
 test_only: False
 known_data_source: True
 dataset_list: ['10shot_cifar100_20200721', '10shot_country211_20210924', '10shot_food_101_20211007', '10shot_oxford_iiit_pets_20211007', '10shot_stanford_cars_20211007']
+# dataset_list: ['10shot_cifar100_20200721']
+# dataset_list: ['10shot_country211_20210924']
+# dataset_list: ['10shot_food_101_20211007']
+# dataset_list: ['10shot_oxford_iiit_pets_20211007']
+# dataset_list: ['10shot_stanford_cars_20211007']
 nb_classes: null
 batch_size: 64
 start_epoch: 0
@@ -11,7 +16,8 @@ bce_loss: False
 unscale_lr: False
 
 # Model Parameters:
-model: swin_tiny_patch4_window7_224 # 7. 更改导入的模型
+# model: swin_tiny_patch4_window7_224 # 7. 更改导入的模型
+model: gcvit_tiny
 input_size: 224
 drop: 0.0
 drop_path: 0.1
@@ -26,15 +32,15 @@ weight_decay: 0.0  # 6. configure weight_decay to mitigate overfitting.
 
 # Learning rate schedule parameters
 sched: cosine
-lr: 1e-4
+lr: 5e-4
 lr_noise: null
 lr_noise_pct: 0.67
 lr_noise_std: 1.0
-warmup_lr: 1e-6
-min_lr: 1e-5
+warmup_lr: 1e-4
+min_lr: 5e-5
 
 decay_epochs: 0
-warmup_epochs: 0
+warmup_epochs: 5
 cooldown_epochs: 0
 patience_epochs: 0
 decay_rate: 0.1
@@ -58,10 +64,12 @@ rotation: False  # 4. augment-2
 data_path: /remote-home/share/course23/aicourse_dataset_final/
 data_set: IMNET
 inat_category: name
-output_dir: output/swin_tiny_patch4_window7_224/B_repeat-aug-part_2 # 1. needs to be customized each run.
+# output_dir: output/swin_tiny_patch4_window7_224/A_5_repeat-aug-part # 1. needs to be customized each run.
+output_dir: output/gcvit_tiny/B_1
 device: cuda
 seed: 0
-resume: '' # 2. needs to be customized each run.
+# resume: 'output/swin_tiny_patch4_window7_224/B_repeat-aug-part/best_checkpoint.pth' # 2. needs to be customized each run.
+resume: ''
 eval: False
 eval_crop_ratio: 0.875
 dist_eval: False

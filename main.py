@@ -343,9 +343,6 @@ def main(args) -> None:
     print(f"Creating model: {args.model}")
     
     # Create a model with the timm function; any other model pre-trained under ImageNet-1k is allowed.
-    # TODO: 任意用 ImageNet-1k 预训练的模型都可以, 也没有限制预训练的方式; 因此不一定要用 timm 提供的预训练参数;
-    # 可以用 supervised-FSL 的方式, 在 imagenet-1k 上有监督地预训练, 之后再利用本任务提供的少量 labeled data 与
-    # 较多 unlabeled data 来 fine-tune.
     model = create_model(args.model, num_classes=args.nb_classes, pretrained=True)
     
     # number of classes for each dataset

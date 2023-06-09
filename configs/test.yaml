@@ -4,6 +4,11 @@
 test_only: True
 known_data_source: False
 dataset_list: ['10shot_cifar100_20200721', '10shot_country211_20210924', '10shot_food_101_20211007', '10shot_oxford_iiit_pets_20211007', '10shot_stanford_cars_20211007']
+# dataset_list: ['10shot_cifar100_20200721']
+# dataset_list: ['10shot_country211_20210924']
+# dataset_list: ['10shot_food_101_20211007']
+# dataset_list: ['10shot_oxford_iiit_pets_20211007']
+# dataset_list: ['10shot_stanford_cars_20211007']
 nb_classes: null
 batch_size: 64
 start_epoch: 0
@@ -13,7 +18,8 @@ bce_loss: False
 unscale_lr: False
 
 # Model Parameters:
-model: swin_tiny_patch4_window7_224 # 7. 更改导入的模型
+# model: swin_tiny_patch4_window7_224 # 7. 更改导入的模型
+model: gcvit_tiny
 input_size: 224
 drop: 0.0
 drop_path: 0.1
@@ -61,10 +67,12 @@ rotation: False  # 4. augment-2
 data_path: /remote-home/share/course23/aicourse_dataset_final/
 data_set: IMNET
 inat_category: name
-output_dir: output/swin_tiny_patch4_window7_224/C_repeat-aug-part # 1. needs to be customized each run.
+# output_dir: output/swin_tiny_patch4_window7_224/A_5_repeat-aug-part # 1. needs to be customized each run.
+output_dir: output/gcvit_tiny/C_1
 device: cuda
 seed: 0
-resume: 'output/swin_tiny_patch4_window7_224/B_repeat-aug-part/best_checkpoint.pth' # 2. needs to be customized each run.
+# resume: 'output/swin_tiny_patch4_window7_224/A_5_repeat-aug-part/best_checkpoint.pth' # 2. needs to be customized each run.
+resume: 'output/gcvit_tiny/B_1/best_checkpoint.pth'
 eval: False
 eval_crop_ratio: 0.875
 dist_eval: False
