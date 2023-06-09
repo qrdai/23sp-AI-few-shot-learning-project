@@ -1,10 +1,12 @@
 # Copyright (c) 2015-present, Facebook, Inc.
 # All rights reserved.
 import argparse
+import os
 import datetime
 import numpy as np
 import time
 import torch
+import torchvision.models
 import operator
 import torch.backends.cudnn as cudnn
 import json
@@ -232,7 +234,7 @@ def get_args_parser():
     return parser
 
 
-@hydra.main(version_base=None, config_path="configs/", config_name="test")
+@hydra.main(version_base=None, config_path="configs/", config_name="baseline")
 def main(args) -> None:
     
     # modif 4: 把 wandb 接入 Hydra config files
@@ -338,34 +340,62 @@ def main(args) -> None:
         )
         data_loader_val_list.append(data_loader_val)
 
+
     print(f"Creating model: {args.model}")
-    
     # Create a model with the timm function; any other model pre-trained under ImageNet-1k is allowed.
-    # TODO: 任意用 ImageNet-1k 预训练的模型都可以, 也没有限制预训练的方式; 因此不一定要用 timm 提供的预训练参数;
-    # 可以用 supervised-FSL 的方式, 在 imagenet-1k 上有监督地预训练, 之后再利用本任务提供的少量 labeled data 与
-    # 较多 unlabeled data 来 fine-tune.
-    model = create_model(args.model, num_classes=args.nb_classes, pretrained=True)
+    # model = create_model(args.model, num_classes=args.nb_classes, pretrained=True)
+    model = torchvision.models.__dict__[args.model](num_classes=args.nb_classes)
+    # init the fc layer (automatically we have it initialized by torchvision.models)
+    # model.fc.weight.data.normal_(mean=0.0, std=0.01)
+    # model.fc.bias.data.zero_()
+    
+    # load from pre-trained, before DistributedDataParallel constructor
+    if args.resume:
+        if os.path.isfile(args.resume):
+            print("=> loading checkpoint '{}'".format(args.resume))
+            checkpoint = torch.load(args.resume, map_location="cpu")
+
+            # rename moco pre-trained keys
+            state_dict = checkpoint["state_dict"]
+            for k in list(state_dict.keys()):
+                # retain only encoder_q up to before the embedding layer
+                if k.startswith("module.encoder_q") and not k.startswith(
+                    "module.encoder_q.fc"
+                ):
+                    # remove prefix
+                    state_dict[k[len("module.encoder_q.") :]] = state_dict[k]
+                # delete renamed or unused k
+                del state_dict[k]
+
+            args.start_epoch = 0    # restart fine-tuning from epoch 0.
+            msg = model.load_state_dict(state_dict, strict=False)
+            assert set(msg.missing_keys) == {"fc.weight", "fc.bias"}
+
+            print("=> loaded pre-trained model '{}'".format(args.resume))
+        else:
+            print("=> no checkpoint found at '{}'".format(args.resume))
     
     # number of classes for each dataset
     multi_dataset_classes = [len(x) for x in dataset_train.classes_list]
 
     # 1. For vit/deit from timm: 
-    if 'deit' in args.model or 'vit' in args.model:
-        model = CustomClassifier(
-            model, model.embed_dim, args.nb_classes, multi_dataset_classes=multi_dataset_classes, 
-            known_data_source=args.known_data_source, model_name=args.model)
+    # if 'deit' in args.model or 'vit' in args.model:
+    #     model = CustomClassifier(
+    #         model, model.embed_dim, args.nb_classes, multi_dataset_classes=multi_dataset_classes, 
+    #         known_data_source=args.known_data_source, model_name=args.model)
 
-    # 2. For swin-transformer/ConvNets from timm:
-    else:
-        model = CustomClassifier(
-            model, model.num_features, args.nb_classes, multi_dataset_classes=multi_dataset_classes, 
-            known_data_source=args.known_data_source, model_name=args.model)
+    # # 2. For swin-transformer/ConvNets from timm:
+    # else:
+    #     model = CustomClassifier(
+    #         model, model.num_features, args.nb_classes, multi_dataset_classes=multi_dataset_classes, 
+    #         known_data_source=args.known_data_source, model_name=args.model)
     
     model.to(device)
 
     # ema 是 Exponential Moving Average 的简称;
     model_ema = None
     if args.model_ema:
+        # For MoCo fine-tuning, args.model_ema = False.
         # Important to create EMA model after cuda(), DP wrapper, and AMP but before SyncBN and DDP wrapper
         model_ema = ModelEma(
             model,
@@ -381,8 +411,10 @@ def main(args) -> None:
     n_parameters = sum(p.numel() for p in model.parameters())
     print('number of params:', n_parameters)
 
-    backbone_params = [x for name, x in model_without_ddp.named_parameters() if 'backbone' in name]
-    custom_params = [x for name, x in model_without_ddp.named_parameters() if 'backbone' not in name]
+    # backbone_params = [x for name, x in model_without_ddp.named_parameters() if 'backbone' in name]
+    # custom_params = [x for name, x in model_without_ddp.named_parameters() if 'backbone' not in name]
+    backbone_params = [x for name, x in model_without_ddp.named_parameters() if 'fc' not in name]
+    custom_params = [x for name, x in model_without_ddp.named_parameters() if 'fc' in name]
 
     # use smaller lr for backbone params
     # backbone parameters 采用 0.1*args.lr, 而 custom_params 采用默认的 args.lr.
@@ -413,22 +445,22 @@ def main(args) -> None:
     # 下面从 url 下载 checkpoints, 并且分别把 checkpoint 中的 'model', 'optimizer', 'lr_scheduler' 等都 load 入对应模块.
     # TODO: 搞懂 checkpoint 的下载和 load 逻辑.
     output_dir = Path(args.output_dir)
-    if args.resume:
-        if args.resume.startswith('https'):
-            checkpoint = torch.hub.load_state_dict_from_url(
-                args.resume, map_location='cpu', check_hash=True)
-        else:
-            checkpoint = torch.load(args.resume, map_location='cpu')
-        model_without_ddp.load_state_dict(checkpoint['model'])
-        if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-            args.start_epoch = checkpoint['epoch'] + 1
-            if args.model_ema:
-                utils._load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
-            if 'scaler' in checkpoint:
-                loss_scaler.load_state_dict(checkpoint['scaler'])
-        lr_scheduler.step(args.start_epoch)
+    # if args.resume:
+    #     if args.resume.startswith('https'):
+    #         checkpoint = torch.hub.load_state_dict_from_url(
+    #             args.resume, map_location='cpu', check_hash=True)
+    #     else:
+    #         checkpoint = torch.load(args.resume, map_location='cpu')
+    #     model_without_ddp.load_state_dict(checkpoint['model'])
+    #     if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
+    #         optimizer.load_state_dict(checkpoint['optimizer'])
+    #         lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+    #         args.start_epoch = checkpoint['epoch'] + 1
+    #         if args.model_ema:
+    #             utils._load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
+    #         if 'scaler' in checkpoint:
+    #             loss_scaler.load_state_dict(checkpoint['scaler'])
+    #     lr_scheduler.step(args.start_epoch)
     
     # 在 test_only 的指令下, 会把 pred_all.json 文件生成在 output_dir 目录下.
     if args.test_only:
@@ -485,7 +517,7 @@ def main(args) -> None:
                     'optimizer': optimizer.state_dict(),
                     'lr_scheduler': lr_scheduler.state_dict(),
                     'epoch': epoch,
-                    'model_ema': get_state_dict(model_ema),
+                    # 'model_ema': get_state_dict(model_ema),   # no model_ema for MoCo.
                     'scaler': loss_scaler.state_dict(),
                     'args': args,
                 }, checkpoint_path)
@@ -512,7 +544,7 @@ def main(args) -> None:
                             'optimizer': optimizer.state_dict(),
                             'lr_scheduler': lr_scheduler.state_dict(),
                             'epoch': epoch,
-                            'model_ema': get_state_dict(model_ema),
+                            # 'model_ema': get_state_dict(model_ema),
                             'scaler': loss_scaler.state_dict(),
                             'args': args,
                         }, checkpoint_path)

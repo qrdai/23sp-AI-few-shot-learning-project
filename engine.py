@@ -38,7 +38,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
         if args.bce_loss:
             targets = targets.gt(0.0).type(targets.dtype)
         with torch.cuda.amp.autocast():
-            outputs = model(samples, dataset_ids)
+            # outputs = model(samples, dataset_ids)
+            outputs = model(samples)    # For MoCo pretrained model.
             if class_indicator is not None :
                 mask = class_indicator[targets]
                 outputs[~mask.bool()] = -1e2 # applying bitwise negation to the binary representation of mask.bool()
@@ -103,7 +104,8 @@ def evaluate(data_loader, model, device, dataset_id=None, dump_result=False, arg
 
         # compute output
         with torch.cuda.amp.autocast():
-            output = model(images, dataset_id)
+            # output = model(images, dataset_id)
+            output = model(images)    # For MoCo pretrained model.
             # print(f'DEBUGGING: output.shape = {output.shape}')
 
         if dump_result :
@@ -167,7 +169,8 @@ def test(data_loader, model, device, dataset_id=None, num_classes_list=None, kno
 
         # compute output
         with torch.cuda.amp.autocast():
-            output = model(images, dataset_id)
+            # output = model(images, dataset_id)
+            output = model(images)    # For MoCo pretrained model.
         file_ids = data[-1].tolist()
 
         if not know_dataset:

@@ -6,16 +6,16 @@ nb_classes: null
 batch_size: 64
 start_epoch: 0
 epochs: 50
-test_interval: 5  # for wandb test
+test_interval: 5
 bce_loss: False
 unscale_lr: False
 
 # Model Parameters:
-model: swin_tiny_patch4_window7_224 # 7. 更改导入的模型
+model: resnet50 # 7. 更改导入的模型(resnet50 for moco)
 input_size: 224
 drop: 0.0
 drop_path: 0.1
-model_ema: True
+model_ema: False # 9. Model.ema set False for MoCo.
 model_ema_decay: 0.99996
 model_ema_force_cpu: False
 opt: adamw
@@ -58,10 +58,10 @@ rotation: False  # 4. augment-2
 data_path: /remote-home/share/course23/aicourse_dataset_final/
 data_set: IMNET
 inat_category: name
-output_dir: output/swin_tiny_patch4_window7_224/B_repeat-aug-part_2 # 1. needs to be customized each run.
+output_dir: output/moco/B_2 # 1. needs to be customized each run.
 device: cuda
 seed: 0
-resume: '' # 2. needs to be customized each run.
+resume: 'moco/checkpoint_0199.pth.tar' # 2. needs to be customized each run.
 eval: False
 eval_crop_ratio: 0.875
 dist_eval: False
