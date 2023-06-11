@@ -17,7 +17,7 @@ unscale_lr: False
 
 # Model Parameters:
 # model: swin_tiny_patch4_window7_224 # 7. 更改导入的模型
-model: gcvit_tiny
+model: resnet50
 input_size: 224
 drop: 0.0
 drop_path: 0.1
@@ -32,15 +32,15 @@ weight_decay: 0.0  # 6. configure weight_decay to mitigate overfitting.
 
 # Learning rate schedule parameters
 sched: cosine
-lr: 5e-4
+lr: 1e-4
 lr_noise: null
 lr_noise_pct: 0.67
 lr_noise_std: 1.0
-warmup_lr: 1e-4
-min_lr: 5e-5
+warmup_lr: 1e-6
+min_lr: 1e-5
 
 decay_epochs: 0
-warmup_epochs: 5
+warmup_epochs: 0
 cooldown_epochs: 0
 patience_epochs: 0
 decay_rate: 0.1
@@ -65,7 +65,7 @@ data_path: /remote-home/share/course23/aicourse_dataset_final/
 data_set: IMNET
 inat_category: name
 # output_dir: output/swin_tiny_patch4_window7_224/A_5_repeat-aug-part # 1. needs to be customized each run.
-output_dir: output/gcvit_tiny/B_1
+output_dir: output/resnet50/B_1
 device: cuda
 seed: 0
 # resume: 'output/swin_tiny_patch4_window7_224/B_repeat-aug-part/best_checkpoint.pth' # 2. needs to be customized each run.

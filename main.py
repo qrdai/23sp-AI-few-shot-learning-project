@@ -87,9 +87,10 @@ class CustomClassifier(torch.nn.Module):
             feature = self.head(feature)
             return feature
 
-        # 4. EfficientNet/Hybrid: MaxVit forward_features 输出形状为 (N, C, H, W);
+        # 4. ConvNet/Hybrid: forward_features 输出形状为 (N, C, H, W);
         elif 'efficientnet' in self.model_name or self.model_name in {
-            'maxvit_tiny_rw_224', 'gcvit_tiny', 'gcvit_xtiny', 'gcvit_small'
+            'maxvit_tiny_rw_224', 'gcvit_tiny', 'gcvit_xtiny', 'gcvit_small',
+            'resnet50'
         }:
             outputs = self.channel_pool(feature)
             outputs = self.head(outputs)
@@ -234,7 +235,7 @@ def get_args_parser():
     return parser
 
 
-@hydra.main(version_base=None, config_path="configs/", config_name="test")
+@hydra.main(version_base=None, config_path="configs/", config_name="baseline")
 def main(args) -> None:
     
     # modif 4: 把 wandb 接入 Hydra config files
