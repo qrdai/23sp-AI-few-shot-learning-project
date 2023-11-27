@@ -58,12 +58,12 @@ class RASampler(torch.utils.data.Sampler):
         indices = indices[self.rank:self.total_size:self.num_replicas]
         assert len(indices) == self.num_samples
 
-        return iter(indices[:self.num_selected_samples])    # 注意: num_selected_samples < num_samples, 大概是1/3倍关系;
+        return iter(indices[:self.num_samples])    # 注意: num_selected_samples < num_samples, 大概是1/3倍关系;
         # 因此导致所有 process 所采 sample 总量之和 等于 len(dataset) 而不等于 len(dataset)*num_repeats; 
         # 进而导致所采的 indices 不完全覆盖 len(self.dataset) 个不同值(大概只覆盖了 1/3 左右)
 
     def __len__(self):
-        return self.num_selected_samples
+        return self.num_samples
 
     def set_epoch(self, epoch):
         self.epoch = epoch
