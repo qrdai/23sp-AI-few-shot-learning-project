@@ -59,6 +59,8 @@ class CustomClassifier(torch.nn.Module):
         self.head = torch.nn.Linear(input_dim, output_dim)
         self.head_dist = torch.nn.Linear(input_dim, output_dim)
 
+    # 注意: 下列 classifier head 只能在 timm=0.6.x(最好是 0.6.13 版本使用); 
+    # 在 0.9.x 版本中, 例如 swin transformers forward_features 的输出形状就由先前的 (N,L,C) 变成了 (N,H,W,C)
     def forward(self, img, dataset_id=None):
         '''dataset_id 这个 input 目前没有被用到; 后续改进时需要思考如何使用它.
         model 应该根据 self.known_data_source 是否为 True 来决定是否能在 forward 中使用 dataset_id 的信息.'''
@@ -67,6 +69,7 @@ class CustomClassifier(torch.nn.Module):
         # forward_features 返回 backbone 处理好的 representation; forward_head 再把它送入最后的线性分类头输出分类向量.
         pdtype = img.dtype
         feature = self.backbone.forward_features(img).to(pdtype)
+        # print(f"Forward_features 输出形状: {feature.size()}")
 
         # 1. deit(no distillation): 只有 cls_token
         if self.model_name in {'deit_small_patch16_224', 'deit_base_patch16_224'}:
@@ -81,10 +84,12 @@ class CustomClassifier(torch.nn.Module):
             dist = self.head_dist(dist)
             return (cls + dist) / 2
 
-        # 3. swin-transformer: (N,L,C) + mean(dim=1)
-        elif self.model_name in {'swin_tiny_patch4_window7_224', 'swin_small_patch4_window7_224'}:
+        # 3.(For timm=0.6.13) swin-transformer: (N,L,C) + mean(dim=1)
+        elif "swin" in self.model_name:
             feature = feature.mean(dim=1)
+            # print(f"feature.mean 之后的形状: {feature.size()}")
             feature = self.head(feature)
+            # print(f"self.head(feature) 之后的形状: {feature.size()}")
             return feature
 
         # 4. EfficientNet/Hybrid: MaxVit forward_features 输出形状为 (N, C, H, W);
@@ -201,7 +206,7 @@ def get_args_parser():
     
     # Dataset parameters
     # modif: 已经把默认的 data_path 换为数据集所在目录.
-    parser.add_argument('--data-path', default='/remote-home/share/course23/aicourse_dataset_final/', type=str,
+    parser.add_argument('--data-path', default='./dataset/', type=str,
                         help='dataset path')
     parser.add_argument('--data-set', default='IMNET', choices=['CIFAR', 'IMNET', 'INAT', 'INAT19'],
                         type=str, help='Image Net dataset path')
@@ -234,7 +239,7 @@ def get_args_parser():
     return parser
 
 
-@hydra.main(version_base=None, config_path="configs/", config_name="test")
+@hydra.main(version_base=None, config_path="configs/", config_name="baseline")
 def main(args) -> None:
     
     # modif 4: 把 wandb 接入 Hydra config files
@@ -274,7 +279,7 @@ def main(args) -> None:
         global_rank = utils.get_rank()
         if args.repeated_aug:
             sampler_train = RASampler(
-                dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True, num_repeats=3
+                dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True, num_repeats=args.num_repeats
             )
         else:
             sampler_train = torch.utils.data.DistributedSampler(
@@ -481,8 +486,11 @@ def main(args) -> None:
             args = args,
         )
 
-        # TODO: Consistent lr now
-        # how to use a lr scheduler for better convergence.
+        # TODO: Consistent lr now; How to use a lr scheduler for better convergence.
+        # Unlike the builtin PyTorch schedulers, timm schedulers are intended to be consistently called
+        # * At the END of each epoch, before incrementing the epoch count, to calculate next epoch's value      
+        lr_scheduler.step(epoch + 1)
+
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             for checkpoint_path in checkpoint_paths:
@@ -522,7 +530,7 @@ def main(args) -> None:
                             'scaler': loss_scaler.state_dict(),
                             'args': args,
                         }, checkpoint_path)
-                
+
             print(f'Max accuracy: {max_accuracy:.2f}%')
 
             log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},

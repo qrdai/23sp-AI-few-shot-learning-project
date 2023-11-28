@@ -2,8 +2,9 @@
 
 # Fundamental training parameters:
 test_only: True
-known_data_source: False
-dataset_list: ['10shot_cifar100_20200721', '10shot_country211_20210924', '10shot_food_101_20211007', '10shot_oxford_iiit_pets_20211007', '10shot_stanford_cars_20211007']
+known_data_source: True
+dataset_list: ['Dataset_BUSI_with_GT']
+# dataset_list: ['10shot_cifar100_20200721', '10shot_country211_20210924', '10shot_food_101_20211007', '10shot_oxford_iiit_pets_20211007', '10shot_stanford_cars_20211007']
 # dataset_list: ['10shot_cifar100_20200721']
 # dataset_list: ['10shot_country211_20210924']
 # dataset_list: ['10shot_food_101_20211007']
@@ -18,8 +19,8 @@ bce_loss: False
 unscale_lr: False
 
 # Model Parameters:
-# model: swin_tiny_patch4_window7_224 # 7. 更改导入的模型
-model: gcvit_tiny
+model: swin_small_patch4_window7_224 # 7. 更改导入的模型
+# model: gcvit_tiny
 input_size: 224
 drop: 0.0
 drop_path: 0.1
@@ -30,7 +31,7 @@ opt: adamw
 opt_eps: 1e-8
 clip_grad: null
 momentum: 0.9
-weight_decay: 0.0  # 6. configure weight_decay to mitigate overfitting.
+weight_decay: 0.01  # 6. configure weight_decay to mitigate overfitting.
 
 # Learning rate schedule parameters
 sched: cosine
@@ -55,7 +56,7 @@ color_jitter: 0.3
 aa: rand-m9-mstd0.5-inc1
 smoothing: 0
 train_interpolation: bicubic
-train_mode: True
+train_mode: False # 也不会影响 test results, 因为在 test 结束后就直接 return, 不会碰到 train 的代码块.
 src: False
 flip: False  # 3. augment-1
 rotation: False  # 4. augment-2
@@ -64,15 +65,15 @@ rotation: False  # 4. augment-2
 # finetune: ''
 
 # Dataset parameters
-data_path: /remote-home/share/course23/aicourse_dataset_final/
+data_path: ./dataset/
 data_set: IMNET
 inat_category: name
-# output_dir: output/swin_tiny_patch4_window7_224/A_5_repeat-aug-part # 1. needs to be customized each run.
-output_dir: output/gcvit_tiny/C_1
+output_dir: output/swin_small_patch4_window7_224/initial_config # 1. needs to be customized each run.
+# output_dir: output/gcvit_tiny/C_1
 device: cuda
 seed: 0
-# resume: 'output/swin_tiny_patch4_window7_224/A_5_repeat-aug-part/best_checkpoint.pth' # 2. needs to be customized each run.
-resume: 'output/gcvit_tiny/B_1/best_checkpoint.pth'
+resume: 'output/swin_small_patch4_window7_224/initial_config/best_checkpoint.pth' # 2. needs to be customized each run.
+# resume: 'output/gcvit_tiny/B_1/best_checkpoint.pth'
 eval: False
 eval_crop_ratio: 0.875
 dist_eval: False
@@ -82,7 +83,7 @@ pin_mem: True
 # wandb parameters:
 wandb:
   setup:
-      project: aicourse
+      project: sta221
       entity: raidriar_dai
       mode: online # may trigger network error
   watch:

@@ -16,17 +16,20 @@ import torch.utils.data as data
 import utils
 import itertools
 
+IMAGE_SIZE = 384
+
 class MultiImageFolder(data.Dataset):
     def __init__(self, dataset_list, transform, loader = default_loader, 
-                    known_data_source=True, is_test=False) -> None:
+                    known_data_source=True, is_test=False, num_repeats=3) -> None:
         '''输入的 dataset_list 中的每个 dataset, 都是 ImageFolder 类的数据集
         TODO: 目前的 MultiImageFolder, 并没有根据 known_dataset_source与否 来改变生成的数据集.'''
         super().__init__()
         self.loader = loader
         self.transform = transform
+        self.num_repeats = num_repeats
         self.std_transform = transforms.Compose([
-            transforms.Resize(224),
-            transforms.CenterCrop(224),
+            transforms.Resize(IMAGE_SIZE),
+            transforms.CenterCrop(IMAGE_SIZE),
             transforms.ToTensor(),
             transforms.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD)
         ])
@@ -75,8 +78,8 @@ class MultiImageFolder(data.Dataset):
         sample = self.loader(path)
 
         if self.transform is not None:
-            # 1/3 的概率下, 不做 augmentation, 返回原图;
-            if torch.rand(1).item() < 0.333:
+            # 1 / num_repeats 的概率下, 不做 augmentation, 返回原图;
+            if torch.rand(1).item() < 1 / self.num_repeats:
                 sample = self.std_transform(sample)
             else:
                 sample = self.transform(sample) # 数据集的 transform 在 MultiImageFolder 取数据的同时才会做.
@@ -134,7 +137,7 @@ def build_dataset(is_train, args):
             dataset = TestFolder(root, transform=transform)
             dataset_list.append(dataset)
             nb_classes += len(dataset.classes)
-        multi_dataset = MultiImageFolder(dataset_list, transform, is_test=True)
+        multi_dataset = MultiImageFolder(dataset_list, transform, is_test=True, num_repeats=args.num_repeats)
         return multi_dataset, nb_classes, None
     else :
         for dataset in args.dataset_list :
@@ -144,14 +147,16 @@ def build_dataset(is_train, args):
             nb_classes += len(dataset.classes)
 
         # MultiImageFolder 的 is_test 默认为 False.
-        multi_dataset = MultiImageFolder(dataset_list, transform, known_data_source=args.known_data_source)
+        multi_dataset = MultiImageFolder(
+            dataset_list, transform, known_data_source=args.known_data_source, num_repeats=args.num_repeats
+        )
 
         # 不管是 train / test, 最后返回的都是 args.dataset_list 中所有数据集的所有 (sample, target, dataset_id)
         # 所组成的一个 MultiImgaeFolder; 以及所有数据集加起来的总 classes 数目.
         return multi_dataset, nb_classes
 
 
-def build_transform(is_train, args, img_size=224,
+def build_transform(is_train, args, img_size=IMAGE_SIZE,
                         mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD):
     # TODO: does any other data augmentation work better?
     # 只有在 train 时才做 augmentation; val 与 test 时都不做 augmentation.
@@ -170,6 +175,7 @@ def build_transform(is_train, args, img_size=224,
         t.append(transforms.Normalize(mean, std))
         return transforms.Compose(t)
 
+    # val 和 test 的时候都不做 augmentation
     t = []
     t.append(transforms.Resize(img_size))
     t.append(transforms.CenterCrop(img_size))
